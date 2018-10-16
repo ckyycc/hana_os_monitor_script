@@ -630,27 +630,3 @@ class MonitorUtility:
                 print("Logging [exception] message '{0}' failed, error:{1}".format(message, ex))
         else:
             print(message)
-
-
-if __name__ == '__main__':
-
-    # MonitorUtility.generate_public_private_key("c:/temp")
-    # print(MonitorUtility.get_decrypt_string(MonitorConst.RSA_KEY_FILE, MonitorConst.SSH_DEFAULT_PASSWORD))
-    # print(MonitorUtility.get_encrypt_string("C:/Data/CK/Keys/monitor_ssh_user_public.pem", "trextrex"))
-    exit(0)
-    # MonitorUtility.send_email("kuang.cheng@sap.com", #DL_QVAN@exchange.sap.corp",
-    #                           ["chengkuang@gmail.com"],
-    #                           "[MEM] Vanpghana11 is Running Out of Memory",
-    #                           "This is a test email!\n\nRegards, \nOMoVHDS",
-    #                           ["chengkuang@yahoo.com"])
-
-    # MonitorUtility.send_email("kuang.cheng@sap.com", #DL_QVAN@exchange.sap.corp",
-    #                           ["chengkuang@gmail.com", "chengkuang@hotmail.com"],
-    #                           "[CKYY.MEM] Vanpghana11 is Running Out of Memory",
-    #                           "This is a test email!\n\nRegards, \nOMoVHDS",
-    #                           ["yuanyuanlca@gmail.com", "chengkuang@yahoo.com"])
-
-    MonitorUtility.send_email("kuang.cheng@sap.com",  # DL_QVAN@exchange.sap.corp",
-                              ["che.ngkuang@gmail.com"],
-                              "[1YY.MEM] Vanpghana11 is Running Out of Memory",
-                              "This is a test email!\n\nRegards, \nOMoVHDS")
