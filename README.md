@@ -1,15 +1,15 @@
-Python script part of HANA Server Operating System Monitoring Tool
+## Python script part of HANA Server Operating System Monitoring Tool
 
 
-## Functionalities:
+### Functionalities:
 
-1.	monitor and save all the resources (CPU, Disk and Memory) consumption information (to DB) for all the configured servers;
-2.	send warning email to the top 5 resource consumers when the threshold of resource consumption is exceeded;
-3.  send warning email to administrators if some server is not available;
+1.	Monitor and save all the resources (CPU, Disk and Memory) consumption information (to DB) for all the configured servers;
+2.	Send warning email to the top 5 resource consumers when the threshold of resource consumption is exceeded;
+3.  Send warning email to administrators if some server is not available;
 4.	Try to shutdown HANA (via HDB stop) instance if the warning email has been sent for over three times (only valid for memory monitoring);
-5.  monitor and save the version info (to DB) for all hana instances.
+5.  Monitor and save the version info (to DB) for all hana instances.
 
-## Design
+### Design
 
 #### Use Case Diagram
 
