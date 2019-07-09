@@ -1,4 +1,4 @@
-## Python script part of HANA Server Operating System Monitoring Tool
+## Script (Python) Part of HANA Server Operating System Monitoring Tool
 
 
 ### Functionalities:
