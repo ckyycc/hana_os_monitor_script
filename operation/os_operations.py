@@ -3,7 +3,7 @@ from util import MonitorConst as Mc
 import paramiko
 
 
-class LinuxMonitorOAO:
+class LinuxMonitorDAO:
     """Operations for Linux, root class for RedHat and SUSE"""
     def __init__(self):
         # get logging
@@ -126,9 +126,11 @@ class LinuxMonitorOAO:
             # modified at 2018/07/22
             # exclude mount_point/shared: --exclude=/usr/sap/shared. It's for the hanging issue of vanpghana06 and 07
             # modified at 2018/07/26
+            # exclude mount_point/temp. It's for hanging issue of llbpal96
+            # modified at 2019/07/05
             sudo_password = os_pwd if neeed_sudo_pwd else None
             cmd_output = self.__ssh_exec_command(
-                "sudo du --exclude={0}/tmp --exclude={0}/shared --exclude=/usr/sap/eua_paths "
+                "sudo du --exclude={0}/tmp --exclude={0}/temp --exclude={0}/shared --exclude=/usr/sap/eua_paths "
                 "--max-depth=1 {0}".format(mount_point),
                 ssh,
                 sudo_password)
@@ -137,11 +139,21 @@ class LinuxMonitorOAO:
             # modified at 2018/07/22
             # exclude mount_point/shared: --exclude=/usr/sap/shared. It's for the hanging issue of vanpghana06 and 07
             # modified at 2018/07/26
+            # exclude mount_point/temp. It's for hanging issue of llbpal96
+            # modified at 2019/07/05
             cmd_output = self.__ssh_exec_command(
-                "du --exclude={0}/tmp --exclude={0}/shared --exclude=/usr/sap/eua_paths "
+                "du --exclude={0}/tmp --exclude={0}/temp --exclude={0}/shared --exclude=/usr/sap/eua_paths "
                 "--max-depth=1 {0} 2>>/dev/null".format(mount_point), ssh)
 
         return cmd_output
+
+    def get_all_hana_version_info(self, ssh, mount):
+        # exclude mount_point/log and mount_point/tmp for hanging issue of llbpal94 and llbpal96
+        return self.__ssh_exec_command(
+            "find {0}/[A-Z][A-Z0-9][A-Z0-9] -path {0}/tmp -prune -o -path {0}/log -prune -o -regex {0}".format(mount) +
+            "/[A-Z][A-Z0-9][A-Z0-9]/.*global/hdb/versionhistory.csv "
+            "-print 2>/dev/null | awk '{for (i=1;i<=NF;i++) "
+            "{system(\"echo \\\"\"$i\";\\\"`tail -1 \"$i\"`\")}}'", ssh)
 
     def get_owners_of_sub_folders(self, ssh, folder):
         # get owner of the all folders in <folder>
@@ -156,14 +168,14 @@ class LinuxMonitorOAO:
         pass
 
 
-class SUSEMonitorOAO(LinuxMonitorOAO):
+class SUSEMonitorDAO(LinuxMonitorDAO):
     """Operations for SUSE Linux
     Will overwrite some functions which need SUSE specific command/parsing"""
     def __init__(self):
         super().__init__()
 
 
-class RedHatMonitorOAO(LinuxMonitorOAO):
+class RedHatMonitorDAO(LinuxMonitorDAO):
     """Operations for RedHat Linux
     Will overwrite some functions which need RedHat specific command/parsing"""
     def __init__(self):

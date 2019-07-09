@@ -1,14 +1,15 @@
 from operation.db_operations import HANAMonitorDAO
-from operation.os_operations import SUSEMonitorOAO
-from operation.os_operations import RedHatMonitorOAO
+from operation.os_operations import SUSEMonitorDAO
+from operation.os_operations import RedHatMonitorDAO
 from operation.simulate_os_operator import LinuxMonitorOAOSimulator as OSSimulator
 from util import MonitorUtility as Mu
 from util import MonitorConst as Mc
 from errors import MonitorDBOpError
 from errors import MonitorOSOpError
 from errors import MonitorDBError
+from errors import MonitorError
+from abc import ABC, abstractmethod
 
-from abc import ABCMeta, abstractmethod
 from datetime import datetime
 from operator import itemgetter
 
@@ -16,21 +17,19 @@ import threading
 import time
 
 
-class Monitor:
-    """The root Class for the Monitor Tools
-        accept      --  Accept the visitors to perform the DB operations
+class Monitor(ABC):
+    """The root (abstract) Class for the Monitor Tools
+        accept      --  Accept the updater to perform the DB operations
         monitoring  --  performing the monitoring job for memory, CPU and Disk
     """
 
-    __metaclass__ = ABCMeta
-
     def __init__(self):
-            self._os_operator = HANAServerOSOperatorService.instance()
-            self._db_operator = HANAServerDBOperatorService.instance()
-            
-    def accept(self, monitor_visitor):
+        self._os_operator = HANAServerOSOperatorService.instance()
+        self._db_operator = HANAServerDBOperatorService.instance()
+
+    def accept(self, updater):
         """Accept the visitors to perform the DB operations"""
-        monitor_visitor.visit(self)
+        updater.update(self)
 
     def get_os_operator(self):
         return self._os_operator
@@ -41,45 +40,8 @@ class Monitor:
     def get_locations(self):
         return self._db_operator.get_locations()
 
-    def _monitor_catalog_stage_in_process(self, check_id, server_id, stage, location_id, msg=None):
-        """set monitor catalog stage to 'IN PROCESS'"""
-        self._db_operator.update_monitor_catalog(check_id,
-                                                 server_id,
-                                                 stage,
-                                                 Mc.MONITOR_STATUS_IN_PROCESS,
-                                                 location_id,
-                                                 msg)
-
-    def _monitor_catalog_stage_error(self, check_id, server_id, stage, location_id, msg=None):
-        """set monitor catalog stage to 'ERROR'"""
-        self._db_operator.update_monitor_catalog(check_id,
-                                                 server_id,
-                                                 stage,
-                                                 Mc.MONITOR_STATUS_ERROR,
-                                                 location_id,
-                                                 msg)
-
-    def _monitor_catalog_stage_warning(self, check_id, server_id, stage, location_id, msg=None):
-        """set monitor catalog stage to 'WARNING"""
-        self._db_operator.update_monitor_catalog(check_id,
-                                                 server_id,
-                                                 stage,
-                                                 Mc.MONITOR_STATUS_WARNING,
-                                                 location_id,
-                                                 msg)
-
-    def _monitor_catalog_stage_complete(self, check_id, server_id, stage, location_id, msg=None):
-        """set monitor catalog stage to 'COMPLETE'"""
-        self._db_operator.update_monitor_catalog(check_id,
-                                                 server_id,
-                                                 stage,
-                                                 Mc.MONITOR_STATUS_COMPLETE,
-                                                 location_id,
-                                                 msg)
-
-    def _monitor_catalog_overall_finish(self, check_id, location_id):
-        """set monitor catalog overall stage to FINISH status, the status might be ERROR, WARNING or COMPLETE"""
-        self._db_operator.update_monitor_catalog_overall_status(check_id, location_id)
+    def get_check_interval(self):
+        return Mc.get_db_check_interval(self._db_operator)
 
     @abstractmethod
     def monitoring(self, check_id, location_id):
@@ -87,8 +49,9 @@ class Monitor:
         pass
 
 
-class MemoryMonitor (Monitor):
+class MemoryMonitor(Monitor):
     """Monitoring for Memory, get top 5 memory consumers relative to HANA by user from all the servers"""
+
     def __init__(self):
         self.__logger = Mu.get_logger(Mc.LOGGER_MONITOR_MEM)
         super().__init__()
@@ -113,10 +76,10 @@ class MemoryMonitor (Monitor):
 
         if server_name_list:
             # As Memory Monitor is the first process, set catalog status to "IN PROCESS"
-            self._monitor_catalog_stage_in_process(check_id,
-                                                   -1,
-                                                   Mc.MONITOR_STAGE_OVERALL,
-                                                   location_id)
+            self.accept(MonitorCatalogUpdater(check_id,
+                                              location_id,
+                                              Mc.MONITOR_STATUS_SERVER_ID_OVER_ALL,
+                                              Mc.MONITOR_STATUS_IN_PROCESS))
 
         for server in server_name_list:
             Mu.log_debug(self.__logger, "Processing:{0}".format(server), location_id)
@@ -129,29 +92,33 @@ class MemoryMonitor (Monitor):
             # Modified at 07/28/2018
             self._os_operator.reset_server_info(server_id)
 
-            self._monitor_catalog_stage_in_process(check_id,
-                                                   server_id,
-                                                   Mc.MONITOR_STAGE_MEM,
-                                                   location_id,
-                                                   server_name)
+            self.accept(MonitorCatalogUpdater(check_id,
+                                              location_id,
+                                              server_id,
+                                              Mc.MONITOR_STATUS_IN_PROCESS,
+                                              server_name))
             Mu.log_info(self.__logger, "Trying to connect {0}".format(server_name), location_id)
             ssh = self._os_operator.open_ssh_connection(server_name)
             if ssh is None:
                 Mu.log_warning(self.__logger, "Failed to connect {0}".format(server_name), location_id)
 
-                self._monitor_catalog_stage_error(check_id,
-                                                  server_id,
-                                                  Mc.MONITOR_STAGE_MEM,
+                self.accept(MonitorCatalogUpdater(check_id,
                                                   location_id,
-                                                  "Failed to connect {0}".format(server_name))
+                                                  server_id,
+                                                  Mc.MONITOR_STATUS_ERROR,
+                                                  "Failed to connect {0}".format(server_name)))
 
                 # Update M_SERVER_INFO (with empty info) as well even
                 # failed to connect the server  ** updated at 07/21/2018 **
-                self._db_operator.update_server_monitoring_info(
-                    check_id,
-                    self._os_operator.get_server_info_by_server_id(server_id),
-                    server_id)
-
+                # self._db_operator.update_server_monitoring_info(
+                #     check_id,
+                #     self._os_operator.get_server_info_by_server_id(server_id),
+                #     server_id)
+                # Update at 07/03/2019 use visitor instead of updating monitor table directly
+                self.accept(MonitorResourceUpdater(check_id,
+                                                   server_id,
+                                                   self._os_operator.get_server_info_by_server_id(server_id),
+                                                   None))  # set it to none to skip update_mem_monitoring_info
                 continue
             try:
                 Mu.log_info(self.__logger, "Connected {0}".format(server_name), location_id)
@@ -174,26 +141,26 @@ class MemoryMonitor (Monitor):
                 # if top_5_mem_consumers:
                 server_info = self._os_operator.get_server_info_by_server_id(server_id)
                 if server_info is not None:
-                    self.accept(MonitorVisitor(check_id,
-                                               server_id,
-                                               server_info,
-                                               mem_consumers,
-                                               self.__logger))
+                    self.accept(MonitorResourceUpdater(check_id,
+                                                       server_id,
+                                                       server_info,
+                                                       mem_consumers))
             finally:
                 self._os_operator.close_ssh_connection(ssh)
 
             Mu.log_info(self.__logger, "Memory Monitoring is done for {0}.".format(server_name), location_id)
-            self._monitor_catalog_stage_complete(check_id,
-                                                 server_id,
-                                                 Mc.MONITOR_STAGE_MEM,
-                                                 location_id,
-                                                 "Memory Monitoring is done for {0}.".format(server_name))
 
+            self.accept(MonitorCatalogUpdater(check_id,
+                                              location_id,
+                                              server_id,
+                                              Mc.MONITOR_STATUS_COMPLETE,
+                                              "Memory Monitoring is done for {0}.".format(server_name)))
         Mu.log_debug(self.__logger, "Memory Monitoring finished.", location_id)
 
 
-class CPUMonitor (Monitor):
+class CPUMonitor(Monitor):
     """Monitoring for CPU, get top 5 CPU consumers that relative to HANA by user from all the servers"""
+
     def __init__(self):
         self.__logger = Mu.get_logger(Mc.LOGGER_MONITOR_CPU)
         super().__init__()
@@ -208,28 +175,33 @@ class CPUMonitor (Monitor):
             server_name = server[Mc.FIELD_SERVER_FULL_NAME]
             server_os = server[Mc.FIELD_OS]
 
-            self._monitor_catalog_stage_in_process(check_id,
-                                                   server_id,
-                                                   Mc.MONITOR_STAGE_CPU,
-                                                   location_id,
-                                                   server_name)
+            self.accept(MonitorCatalogUpdater(check_id,
+                                              location_id,
+                                              server_id,
+                                              Mc.MONITOR_STATUS_IN_PROCESS,
+                                              server_name))
 
             Mu.log_info(self.__logger, "Trying to connect {0}".format(server_name), location_id)
             ssh = self._os_operator.open_ssh_connection(server_name)
             if ssh is None:
                 Mu.log_warning(self.__logger, "Failed to connect {0}".format(server_name), location_id)
-                self._monitor_catalog_stage_error(check_id,
-                                                  server_id,
-                                                  Mc.MONITOR_STAGE_CPU,
-                                                  location_id,
-                                                  "Failed to connect {0}".format(server_name))
 
+                self.accept(MonitorCatalogUpdater(check_id,
+                                                  location_id,
+                                                  server_id,
+                                                  Mc.MONITOR_STATUS_ERROR,
+                                                  "Failed to connect {0}".format(server_name)))
                 # Update M_SERVER_INFO (with empty info) as well even
                 # failed to connect the server  ** updated at 07/21/2018 **
-                self._db_operator.update_server_monitoring_info(
-                    check_id,
-                    self._os_operator.get_server_info_by_server_id(server_id),
-                    server_id)
+                # self._db_operator.update_server_monitoring_info(
+                #     check_id,
+                #     self._os_operator.get_server_info_by_server_id(server_id),
+                #     server_id)
+                # Update at 07/03/2019 use visitor instead of updating monitor table directly
+                self.accept(MonitorResourceUpdater(check_id,
+                                                   server_id,
+                                                   self._os_operator.get_server_info_by_server_id(server_id),
+                                                   None))  # set it to none to skip update_mem_monitoring_info
                 continue
             try:
                 Mu.log_info(self.__logger, "Connected {0}".format(server_name), location_id)
@@ -252,23 +224,23 @@ class CPUMonitor (Monitor):
                 # if top_5_cpu_consumers:
                 server_info = self._os_operator.get_server_info_by_server_id(server_id)
                 if server_info is not None:
-                    self.accept(MonitorVisitor(check_id,
-                                               server_id,
-                                               server_info,
-                                               cpu_consumers,
-                                               self.__logger))
+                    self.accept(MonitorResourceUpdater(check_id,
+                                                       server_id,
+                                                       server_info,
+                                                       cpu_consumers))
             finally:
                 self._os_operator.close_ssh_connection(ssh)
             Mu.log_info(self.__logger, "CPU Monitoring is done for {0}.".format(server_name), location_id)
-            self._monitor_catalog_stage_complete(check_id,
-                                                 server_id,
-                                                 Mc.MONITOR_STAGE_CPU,
-                                                 location_id,
-                                                 "CPU Monitoring is done for {0}.".format(server_name))
+
+            self.accept(MonitorCatalogUpdater(check_id,
+                                              location_id,
+                                              server_id,
+                                              Mc.MONITOR_STATUS_COMPLETE,
+                                              "CPU Monitoring is done for {0}.".format(server_name)))
         Mu.log_debug(self.__logger, "CPU Monitoring finished.", location_id)
 
 
-class DiskMonitor (Monitor):
+class DiskMonitor(Monitor):
     """Monitoring for Disk, get disk consuming information by user from all the servers"""
 
     def __init__(self):
@@ -287,29 +259,32 @@ class DiskMonitor (Monitor):
             mount_point = server[Mc.FIELD_MOUNT_POINT]
             server_os = server[Mc.FIELD_OS]
 
-            self._monitor_catalog_stage_in_process(check_id,
-                                                   server_id,
-                                                   Mc.MONITOR_STAGE_DISK,
-                                                   location_id,
-                                                   server_name)
-
+            self.accept(MonitorCatalogUpdater(check_id,
+                                              location_id,
+                                              server_id,
+                                              Mc.MONITOR_STATUS_IN_PROCESS,
+                                              server_name))
             Mu.log_info(self.__logger, "Trying to connect {0}".format(server_name), location_id)
             ssh = self._os_operator.open_ssh_connection(server_name)
             if ssh is None:
                 Mu.log_warning(self.__logger, "Failed to connect {0}".format(server_name), location_id)
-                self._monitor_catalog_stage_error(check_id,
-                                                  server_id,
-                                                  Mc.MONITOR_STAGE_DISK,
-                                                  location_id,
-                                                  "Failed to connect {0}".format(server_name))
 
+                self.accept(MonitorCatalogUpdater(check_id,
+                                                  location_id,
+                                                  server_id,
+                                                  Mc.MONITOR_STATUS_ERROR,
+                                                  "Failed to connect {0}".format(server_name)))
                 # Update M_SERVER_INFO (with empty info) as well even
                 # failed to connect the server  ** updated at 07/21/2018 **
-                self._db_operator.update_server_monitoring_info(
-                    check_id,
-                    self._os_operator.get_server_info_by_server_id(server_id),
-                    server_id)
-
+                # self._db_operator.update_server_monitoring_info(
+                #     check_id,
+                #     self._os_operator.get_server_info_by_server_id(server_id),
+                #     server_id)
+                # Update at 07/03/2019 use visitor instead of updating monitor table directly
+                self.accept(MonitorResourceUpdater(check_id,
+                                                   server_id,
+                                                   self._os_operator.get_server_info_by_server_id(server_id),
+                                                   None))  # set it to none to skip update_mem_monitoring_info
                 continue
             try:
                 Mu.log_info(self.__logger, "Connected {0}".format(server_name), location_id)
@@ -339,83 +314,214 @@ class DiskMonitor (Monitor):
                 # if consuming_info:
                 server_info = self._os_operator.get_server_info_by_server_id(server_id)
                 if server_info is not None:
-                    self.accept(MonitorVisitor(check_id,
-                                               server_id,
-                                               server_info,
-                                               disk_consumers,
-                                               self.__logger))
+                    self.accept(MonitorResourceUpdater(check_id,
+                                                       server_id,
+                                                       server_info,
+                                                       disk_consumers))
             finally:
                 self._os_operator.close_ssh_connection(ssh)
             Mu.log_info(self.__logger, "Disk Monitoring is done for {0}.".format(server_name), location_id)
-            self._monitor_catalog_stage_complete(check_id,
-                                                 server_id,
-                                                 Mc.MONITOR_STAGE_DISK,
-                                                 location_id,
-                                                 "Disk Monitoring is done for {0}.".format(server_name))
 
-        self._monitor_catalog_overall_finish(check_id, location_id)
+            self.accept(MonitorCatalogUpdater(check_id,
+                                              location_id,
+                                              server_id,
+                                              Mc.MONITOR_STATUS_COMPLETE,
+                                              "Disk Monitoring is done for {0}.".format(server_name)))
+        # set over all status to complete
+        self.accept(MonitorCatalogUpdater(check_id,
+                                          location_id,
+                                          Mc.MONITOR_STATUS_SERVER_ID_OVER_ALL,
+                                          Mc.MONITOR_STATUS_COMPLETE))
         Mu.log_debug(self.__logger, "Disk Monitoring finished.", location_id)
 
 
-class MonitorVisitor(object):
+class VersionMonitor(Monitor):
+    """Collecting info for hana versions, update hana version info from all the servers.
+    Not to affect the overall status calculation, this stage is not counted when calculating status of overall stage
+    """
+
+    def __init__(self):
+        self.__logger = Mu.get_logger(Mc.LOGGER_MONITOR_VERSION)
+        super().__init__()
+
+    def monitoring(self, check_id, location_id):
+        Mu.log_debug(self.__logger, "[{0}]Version Monitoring begin...".format(check_id), location_id)
+        server_name_list = self._db_operator.get_server_full_names(location_id)
+
+        for server in server_name_list:
+            Mu.log_debug(self.__logger, "Processing:{0}".format(server), location_id)
+            server_id = server[Mc.FIELD_SERVER_ID]
+            server_name = server[Mc.FIELD_SERVER_FULL_NAME]
+            mount_point = server[Mc.FIELD_MOUNT_POINT]
+            server_os = server[Mc.FIELD_OS]
+
+            # stage version will not affect the overall stage, not like the other three stages
+            self.accept(MonitorCatalogUpdater(check_id,
+                                              location_id,
+                                              server_id,
+                                              Mc.MONITOR_STATUS_IN_PROCESS,
+                                              server_name))
+            Mu.log_info(self.__logger, "Trying to connect {0}".format(server_name), location_id)
+            ssh = self._os_operator.open_ssh_connection(server_name)
+            if ssh is None:
+                Mu.log_warning(self.__logger, "Failed to connect {0}".format(server_name), location_id)
+
+                self.accept(MonitorCatalogUpdater(check_id,
+                                                  location_id,
+                                                  server_id,
+                                                  Mc.MONITOR_STATUS_ERROR,
+                                                  "Failed to connect {0}".format(server_name)))
+                continue
+            try:
+                Mu.log_info(self.__logger, "Connected {0}".format(server_name), location_id)
+                Mu.log_debug(self.__logger, "Trying to get version info of {0}".format(server_name), location_id)
+                # collect version info for one server by server id
+                version_info = self._os_operator.get_all_hana_version_info(ssh, server_id, server_os, mount_point)
+                Mu.log_debug(self.__logger,
+                             "Version information of {0} is {1}".format(server_name, version_info),
+                             location_id)
+
+                if version_info:  # will skip update database if version info is empty
+                    self.accept(MonitorResourceUpdater(check_id,
+                                                       server_id,
+                                                       None,
+                                                       version_info))
+                else:
+                    Mu.log_debug(self.__logger,
+                                 "Version information for {0} is empty, skipped updating db.".format(server_name))
+            finally:
+                self._os_operator.close_ssh_connection(ssh)
+            Mu.log_info(self.__logger, "Version Monitoring is done for {0}.".format(server_name), location_id)
+
+            self.accept(MonitorCatalogUpdater(check_id,
+                                              location_id,
+                                              server_id,
+                                              Mc.MONITOR_STATUS_COMPLETE,
+                                              "Version Monitoring is done for {0}.".format(server_name)))
+
+        Mu.log_debug(self.__logger, "Version Monitoring finished.", location_id)
+
+
+class DBUpdater(ABC):
+    @abstractmethod
+    def update(self, monitor):
+        """abstract method, needs to be overwritten in child classes"""
+        pass
+
+
+class MonitorResourceUpdater(DBUpdater):
     """Visitor for all monitor classes, it's for updating information of the monitoring processes including
     the monitoring for the memory, CPU and disk to HANA DB"""
 
-    def __init__(self, monitor_check_id, server_id, server_info, monitor_updates, logger):
-        self.check_id = monitor_check_id
-        self.server_id = server_id
-        self.server_info = server_info
-        self.monitor_updates = monitor_updates
-        self.__logger = logger
+    def __init__(self, check_id, server_id, server_info, monitor_updates):
+        self.__check_id = check_id
+        self.__server_id = server_id
+        self.__server_info = server_info
+        self.__monitor_updates = monitor_updates
 
-    def visit(self, monitor):
+    def update(self, monitor):
         if isinstance(monitor, MemoryMonitor):
-            self.__visit_mem_monitor(monitor)
+            self.__update_mem_monitor(monitor)
         elif isinstance(monitor, CPUMonitor):
-            self.__visit_cpu_monitor(monitor)
+            self.__update_cpu_monitor(monitor)
         elif isinstance(monitor, DiskMonitor):
-            self.__visit_disk_monitor(monitor)
+            self.__update_disk_monitor(monitor)
+        elif isinstance(monitor, VersionMonitor):
+            self.__update_version_monitor(monitor)
 
-    def __visit_mem_monitor(self, monitor):
+    def __update_mem_monitor(self, monitor):
         # update the memory monitoring info with:
         # 1. the server memory overview info (self.server_info)
         # 2. top 5 memory consuming info (self.monitor_updates).
-        monitor.get_db_operator().update_mem_monitoring_info(self.check_id,
-                                                             self.server_id,
-                                                             self.server_info,
-                                                             self.monitor_updates)
+        monitor.get_db_operator().update_mem_monitoring_info(self.__check_id,
+                                                             self.__server_id,
+                                                             self.__server_info,
+                                                             self.__monitor_updates)
 
-    def __visit_cpu_monitor(self, monitor):
+    def __update_cpu_monitor(self, monitor):
         # update the cpu monitoring info with:
         # 1. the server cpu overview info (self.server_info)
         # 2. top 5 cpu consuming info (self.monitor_updates).
-        monitor.get_db_operator().update_cpu_monitoring_info(self.check_id,
-                                                             self.server_id,
-                                                             self.server_info,
-                                                             self.monitor_updates)
+        monitor.get_db_operator().update_cpu_monitoring_info(self.__check_id,
+                                                             self.__server_id,
+                                                             self.__server_info,
+                                                             self.__monitor_updates)
 
-    def __visit_disk_monitor(self, monitor):
+    def __update_disk_monitor(self, monitor):
         # update the disk monitoring info with:
         # 1. the server disk overview info (self.server_info)
         # 2. top 5 disk consuming info (self.monitor_updates).
-        monitor.get_db_operator().update_disk_monitoring_info(self.check_id,
-                                                              self.server_id,
-                                                              self.server_info,
-                                                              self.monitor_updates)
+        monitor.get_db_operator().update_disk_monitoring_info(self.__check_id,
+                                                              self.__server_id,
+                                                              self.__server_info,
+                                                              self.__monitor_updates)
+
+    def __update_version_monitor(self, monitor):
+        # update version info with self.monitor_updates
+        monitor.get_db_operator().update_version_info(self.__check_id,
+                                                      self.__server_id,
+                                                      self.__monitor_updates)
 
 
-class MonitorImprover (Monitor):
+class MonitorCatalogUpdater(DBUpdater):
+    """Visitor for monitor catalog from the monitor classes , it's for updating status of the monitoring processes to
+    the monitoring catalog to HANA DB"""
+
+    def __init__(self, check_id, location_id, server_id=None, status=None, msg=None):
+        self.__check_id = check_id
+        self.__server_id = server_id
+        self.__status = status
+        self.__location_id = location_id
+        self.__msg = msg
+        self.__stage = None
+
+    def update(self, monitor):
+        if isinstance(monitor, MemoryMonitor):
+            # over all status can only be recorded from memory monitor
+            self.__stage = Mc.MONITOR_STAGE_OVERALL \
+                if self.__server_id == Mc.MONITOR_STATUS_SERVER_ID_OVER_ALL else Mc.MONITOR_STAGE_MEM
+        elif isinstance(monitor, CPUMonitor):
+            self.__stage = Mc.MONITOR_STAGE_CPU
+        elif isinstance(monitor, DiskMonitor):
+            # over all status can only be recorded in disk monitor
+            if self.__server_id == Mc.MONITOR_STATUS_SERVER_ID_OVER_ALL and self.__status == Mc.MONITOR_STATUS_COMPLETE:
+                self.__update_monitor_catalog_overall_finish(monitor)
+                return
+            else:
+                self.__stage = Mc.MONITOR_STAGE_DISK
+        elif isinstance(monitor, VersionMonitor):
+            self.__stage = Mc.MONITOR_STAGE_VERSION
+        else:
+            raise MonitorError("Unknown class: {0}!".format(monitor.__class__.__name__))
+
+        self.__update_monitor_catalog(monitor)
+
+    def __update_monitor_catalog(self, monitor):
+        monitor.get_db_operator().update_monitor_catalog(self.__check_id,
+                                                         self.__server_id,
+                                                         self.__stage,
+                                                         self.__status,
+                                                         self.__location_id,
+                                                         self.__msg)
+
+    def __update_monitor_catalog_overall_finish(self, monitor):
+        """set monitor catalog overall stage to FINISH status, the status might be ERROR, WARNING or COMPLETE"""
+        monitor.get_db_operator().update_monitor_catalog_overall_status(self.__check_id, self.__location_id)
+
+
+class MonitorExtension(Monitor):
     """Root class to provide the improvements of some features for current monitor"""
+
     def __init__(self, monitor):
         super().__init__()
-        self.monitor = monitor
+        self._monitor = monitor
 
     def monitoring(self, check_id, location_id):
-        self.monitor.monitoring(check_id, location_id)
+        self._monitor.monitoring(check_id, location_id)
 
 
-class MonitorImproverEmailAndMeasure (MonitorImprover):
-    """Decorator of monitor for sending monitor mails for:
+class MonitorAdminExtension(MonitorExtension):
+    """Decorator of monitor for sending monitor mails to administrators:
     1. memory: when total available memory less then threshold:
         a. will send email to administrator
         b. will send email to the top 5 persons who consume most memory
@@ -428,14 +534,15 @@ class MonitorImproverEmailAndMeasure (MonitorImprover):
         a. will send email to administrator
         b. will send email to the top 5 person who consume most disk
     """
+
     def __init__(self, monitor):
         super().__init__(monitor)
-        self.__logger = Mu.get_logger(Mc.LOGGER_MONITOR_IMPROVER)
+        self.__logger = Mu.get_logger(Mc.LOGGER_MONITOR_EXTENSION)
 
     def monitoring(self, check_id, location_id):
-        self.monitor.monitoring(check_id, location_id)
+        super().monitoring(check_id, location_id)
         # Get current server overview info (including the CPU, Disk, Memory)
-        current_process_status = self.monitor.get_db_operator().get_current_process_status(location_id)
+        current_process_status = self._monitor.get_db_operator().get_current_process_status(location_id)
 
         if current_process_status != Mc.MONITOR_STATUS_COMPLETE and \
                 current_process_status != Mc.MONITOR_STATUS_WARNING and \
@@ -450,7 +557,7 @@ class MonitorImproverEmailAndMeasure (MonitorImprover):
                          location_id)
             return
 
-        current_servers_info = self.monitor.get_db_operator().get_current_servers_info(location_id)
+        current_servers_info = self._monitor.get_db_operator().get_current_servers_info(location_id)
 
         for server_info in current_servers_info:
             server_id = server_info[Mc.FIELD_SERVER_ID]
@@ -490,7 +597,7 @@ class MonitorImproverEmailAndMeasure (MonitorImprover):
         memory_total = server_info[Mc.FIELD_MEM_TOTAL]
         os = server_info[Mc.FIELD_OS]
 
-        free_mem_threshold = ((100 - Mc.get_db_mem_usage_warn_threshold(self.monitor.get_db_operator(),
+        free_mem_threshold = ((100 - Mc.get_db_mem_usage_warn_threshold(self._monitor.get_db_operator(),
                                                                         self.__logger)) * memory_total) / 100
 
         Mu.log_debug(self.__logger,
@@ -499,7 +606,7 @@ class MonitorImproverEmailAndMeasure (MonitorImprover):
         # send email out if free memory less then the threshold
         if memory_free is not None and memory_free < free_mem_threshold:
             # sending warning email to top 5 memory consumers
-            top5_mem_consumers = self.monitor.get_db_operator().get_top5_memory_consumers(server_id)
+            top5_mem_consumers = self._monitor.get_db_operator().get_top5_memory_consumers(server_id)
             Mu.log_debug(self.__logger,
                          "Server ({0}), top 5 memory consumers:{1}".format(server_name, top5_mem_consumers),
                          location_id)
@@ -510,22 +617,23 @@ class MonitorImproverEmailAndMeasure (MonitorImprover):
                                            "(and performing HDB stop) because of the non-working time.")
                 return
 
-            email_to = [consumer[Mc.FIELD_EMAIL] for consumer in top5_mem_consumers if consumer[Mc.FIELD_EMAIL] is not None]
+            email_to = [consumer[Mc.FIELD_EMAIL]
+                        for consumer in top5_mem_consumers if consumer[Mc.FIELD_EMAIL] is not None]
             Mu.log_debug(self.__logger, "[MEM] Sending email to:{0}".format(email_to), location_id)
-            Mu.send_email(Mc.get_db_email_sender(self.monitor.get_db_operator(), self.__logger),
+            Mu.send_email(Mc.get_db_email_sender(self._monitor.get_db_operator(), self.__logger),
                           email_to,
                           "[MONITOR.MEM] {0} is Running Out of Memory".format(server_name),
                           Mu.generate_email_body(server_info, Mc.SERVER_INFO_MEM, top5_mem_consumers),
-                          self.monitor.get_db_operator().get_email_admin(location_id))
+                          self._monitor.get_db_operator().get_email_admin(location_id))
 
             # performing HDB stop for the highest memory consumer
             # if the condition meets (continues checking failed for three times)
-            last3_servers_info = self.monitor.get_db_operator().get_last3_servers_info(server_id,
-                                                                                       free_mem_threshold,
-                                                                                       Mc.SERVER_INFO_MEM)
+            last3_servers_info = self._monitor.get_db_operator().get_last3_servers_info(server_id,
+                                                                                        free_mem_threshold,
+                                                                                        Mc.SERVER_INFO_MEM)
             failure_times = len(last3_servers_info) if last3_servers_info else 0
             Mu.log_debug(self.__logger, "Continuous checking failure time(s):{0}".format(failure_times), location_id)
-            if failure_times >= Mc.get_db_max_failure_times(self.monitor.get_db_operator(), self.__logger):
+            if failure_times >= Mc.get_db_max_failure_times(self._monitor.get_db_operator(), self.__logger):
                 # get the highest consumer (the sid with filter flag will be skipped) and perform HDB stop
                 highest_consumer = self.__get_highest_memory_consumer(top5_mem_consumers, server_id, location_id)
                 if highest_consumer:
@@ -542,9 +650,9 @@ class MonitorImproverEmailAndMeasure (MonitorImprover):
 
                     # get ssh with <sid>user and the default password
                     Mu.log_info(self.__logger, "Trying to connect {0}".format(server_name), location_id)
-                    ssh = self.monitor.get_os_operator().open_ssh_connection(server_name,
-                                                                             user_name,
-                                                                             Mc.get_sidadmin_default_password())
+                    ssh = self._monitor.get_os_operator().open_ssh_connection(server_name,
+                                                                              user_name,
+                                                                              Mc.get_sidadmin_default_password())
                     if ssh is None:
                         Mu.log_warning(self.__logger,
                                        "Failed to connect {0}, with user {1}".format(server_name, user_name),
@@ -557,7 +665,7 @@ class MonitorImproverEmailAndMeasure (MonitorImprover):
                                         "({3}%) memory.".format(sid, server_name, user_name, mem_usage),
                                         location_id)
 
-                            self.monitor.get_os_operator().shutdown_hana(ssh, os)
+                            self._monitor.get_os_operator().shutdown_hana(ssh, os)
                             Mu.log_info(self.__logger,
                                         "HANA:{0} on {1} shutdown is processed.".format(sid, server_name),
                                         location_id)
@@ -574,18 +682,18 @@ class MonitorImproverEmailAndMeasure (MonitorImprover):
                                               "Monitor".format(employee_name, server_name, sid))
                                 Mu.log_debug(self.__logger, "[MEM] Sending email to:{0} for "
                                                             "shutting down HANA.".format(email_to), location_id)
-                                Mu.send_email(Mc.get_db_email_sender(self.monitor.get_db_operator(), self.__logger),
+                                Mu.send_email(Mc.get_db_email_sender(self._monitor.get_db_operator(), self.__logger),
                                               email_to,
                                               "[MONITOR.MEM] {0} on {1} is Shutting Down".format(sid, server_name),
                                               email_body,
-                                              self.monitor.get_db_operator().get_email_admin(location_id))
+                                              self._monitor.get_db_operator().get_email_admin(location_id))
                             else:
                                 Mu.log_info(self.__logger,
                                             "HANA:{0} on {1} shutdown is processed, "
                                             "but no email configured.".format(sid, server_name),
                                             location_id)
                         finally:
-                            self.monitor.get_os_operator().close_ssh_connection(ssh)
+                            self._monitor.get_os_operator().close_ssh_connection(ssh)
 
     def __get_highest_memory_consumer(self, top5_mem_consumers, server_id, location_id):
         # get the consumer which consuming highest memory, skip the important server
@@ -594,7 +702,7 @@ class MonitorImproverEmailAndMeasure (MonitorImprover):
             return None
         for i in range(0, len(top5_mem_consumers)):
             sid = Mu.get_sid_from_sidadm(top5_mem_consumers[i]["USER_NAME"])
-            if self.monitor.get_db_operator().is_important_server(sid, server_id):
+            if self._monitor.get_db_operator().is_important_server(sid, server_id):
                 Mu.log_debug(self.__logger,
                              "skip the important SID:{0} in server (id):{1}".format(sid, server_id),
                              location_id)
@@ -611,7 +719,7 @@ class MonitorImproverEmailAndMeasure (MonitorImprover):
         disk_free = server_info[Mc.FIELD_DISK_FREE]
         disk_total = server_info[Mc.FIELD_DISK_TOTAL]
 
-        free_disk_threshold = ((100 - Mc.get_db_disk_usage_warn_threshold(self.monitor.get_db_operator(),
+        free_disk_threshold = ((100 - Mc.get_db_disk_usage_warn_threshold(self._monitor.get_db_operator(),
                                                                           self.__logger)) * disk_total) / 100
 
         Mu.log_debug(self.__logger,
@@ -619,7 +727,7 @@ class MonitorImproverEmailAndMeasure (MonitorImprover):
                      location_id)
         if disk_free is not None and disk_free < free_disk_threshold:
             # sending warning email to top 5 disk consumers
-            top5_disk_consumers = self.monitor.get_db_operator().get_top5_disk_consumers(server_id)
+            top5_disk_consumers = self._monitor.get_db_operator().get_top5_disk_consumers(server_id)
             Mu.log_debug(self.__logger,
                          "Server ({0}), top 5 disk consumers:{1}".format(server_name, top5_disk_consumers),
                          location_id)
@@ -631,16 +739,16 @@ class MonitorImproverEmailAndMeasure (MonitorImprover):
 
             email_to = [consumer["EMAIL"] for consumer in top5_disk_consumers if consumer["EMAIL"] is not None]
             Mu.log_debug(self.__logger, "[DISK] Sending email to:{0}".format(email_to), location_id)
-            Mu.send_email(Mc.get_db_email_sender(self.monitor.get_db_operator(), self.__logger),
+            Mu.send_email(Mc.get_db_email_sender(self._monitor.get_db_operator(), self.__logger),
                           email_to,
                           "[MONITOR.DISK] {0} is Running Out of Disk".format(server_name),
                           Mu.generate_email_body(server_info, Mc.SERVER_INFO_DISK, top5_disk_consumers),
-                          self.monitor.get_db_operator().get_email_admin(location_id))
+                          self._monitor.get_db_operator().get_email_admin(location_id))
 
     def __check_monitoring_status_and_email(self, check_id, location_id):
         """check whether there are some servers which all the three stages monitoring process are failed,
         and send mail to administrators to warn this."""
-        servers = self.monitor.get_db_operator().get_failed_servers(check_id, location_id)
+        servers = self._monitor.get_db_operator().get_failed_servers(check_id, location_id)
         if not servers:
             return
 
@@ -659,8 +767,8 @@ class MonitorImproverEmailAndMeasure (MonitorImprover):
                         "\n",
                         "Normally the monitoring process failed because of the connection not working, "
                         "please have a check with the relative connection(s)."])
-        Mu.send_email(Mc.get_db_email_sender(self.monitor.get_db_operator(), self.__logger),
-                      self.monitor.get_db_operator().get_email_admin(location_id),
+        Mu.send_email(Mc.get_db_email_sender(self._monitor.get_db_operator(), self.__logger),
+                      self._monitor.get_db_operator().get_email_admin(location_id),
                       subject,
                       body)
 
@@ -673,14 +781,14 @@ class MonitorImproverEmailAndMeasure (MonitorImprover):
         server_name = server_info[Mc.FIELD_SERVER_FULL_NAME]
         cpu_usage = server_info[Mc.FIELD_CPU_UTILIZATION]
 
-        cpu_threshold = Mc.get_db_cpu_usage_warn_threshold(self.monitor.get_db_operator(), self.__logger)
+        cpu_threshold = Mc.get_db_cpu_usage_warn_threshold(self._monitor.get_db_operator(), self.__logger)
 
         Mu.log_debug(self.__logger,
                      "Server:{0}, cpu usage:{1}, threshold:{2}".format(server_name, cpu_usage, cpu_threshold),
                      location_id)
         if cpu_usage is not None and cpu_usage > cpu_threshold:
             # sending warning email to top 5 CPU consumers
-            top5_cpu_consumers = self.monitor.get_db_operator().get_top5_cpu_consumers(server_id)
+            top5_cpu_consumers = self._monitor.get_db_operator().get_top5_cpu_consumers(server_id)
             Mu.log_debug(self.__logger,
                          "Server ({0}), top 5 cpu consumers:{1}".format(server_name, top5_cpu_consumers),
                          location_id)
@@ -692,11 +800,11 @@ class MonitorImproverEmailAndMeasure (MonitorImprover):
 
             email_to = [consumer["EMAIL"] for consumer in top5_cpu_consumers if consumer["EMAIL"] is not None]
             Mu.log_debug(self.__logger, "[CPU] Sending email to:{0}".format(email_to), location_id)
-            Mu.send_email(Mc.get_db_email_sender(self.monitor.get_db_operator(), self.__logger),
+            Mu.send_email(Mc.get_db_email_sender(self._monitor.get_db_operator(), self.__logger),
                           email_to,
                           "[MONITOR.CPU] {0} is Running Out of CPU Resource".format(server_name),
                           Mu.generate_email_body(server_info, Mc.SERVER_INFO_CPU, top5_cpu_consumers),
-                          self.monitor.get_db_operator().get_email_admin(location_id))
+                          self._monitor.get_db_operator().get_email_admin(location_id))
 
 
 class HANAServerOSOperatorService:
@@ -718,8 +826,8 @@ class HANAServerOSOperatorService:
             raise MonitorOSOpError("This class is a singleton, use HANAServerOSOperatorService.instance() instead")
         else:
             HANAServerOSOperatorService.__instance = self
-            self.__suse_oao = SUSEMonitorOAO()
-            self.__redhat_oao = RedHatMonitorOAO()
+            self.__suse_dao = SUSEMonitorDAO()
+            self.__redhat_dao = RedHatMonitorDAO()
             self.__server_info = {}
             # base64.b64decode(Mc.SSH_DEFAULT_PASSWORD).decode("utf-8")
             self.__os_passwd = Mu.get_decrypt_string(Mc.get_rsa_key_file(), Mc.get_ssh_default_password())
@@ -732,7 +840,7 @@ class HANAServerOSOperatorService:
             server_os = Mc.get_ssh_default_os_type()
             # raise MonitorOSOpError("The relative server does not have 'OS' information, failed at '__get_oao'")
 
-        return self.__suse_oao if "SUSE" in server_os.upper() else self.__redhat_oao
+        return self.__suse_dao if "SUSE" in server_os.upper() else self.__redhat_dao
 
     def open_ssh_connection(self, server_name, user_name=None, user_password=None):
         if user_name is None or user_password is None:
@@ -874,7 +982,7 @@ class HANAServerOSOperatorService:
             os_version = ''
         else:
             try:
-                os_version = str(os_output_os_version[0])\
+                os_version = str(os_output_os_version[0]) \
                     .split('=')[1].replace('\\n', '').replace('"', '').replace("'", "")
             except Exception as ex:
                 os_version = ''
@@ -1023,6 +1131,26 @@ class HANAServerOSOperatorService:
                 Mu.log_warning(self.__logger, "Parsing SSH output failed in 'get_all_sid_users' with error: {0}, "
                                               "server: {1}, the output: {2}".format(ex, server_id, os_output))
         return sid_users
+
+    def get_all_hana_version_info(self, ssh, server_id, os, mount_point):
+        """get version info for all hana instance, only check the ones which are installed under /usr/sap/<SID>"""
+        os_output = self.__get_oao(os).get_all_hana_version_info(ssh, mount_point)
+        if os_output is None:
+            Mu.log_warning(self.__logger, "Can not get hana version info for server:{0}.".format(server_id))
+            hana_version_info = []
+        else:
+            try:
+                hana_version_info = [
+                    {Mc.FIELD_SID: i.split(";")[0][len(mount_point) + 1: len(mount_point) + 4],  # + 1 means "/"
+                     Mc.FIELD_REVISION: i.split(";")[2],
+                     Mc.FIELD_RELEASE_SP: i.split(";")[3].split("/")[1] if "/" in i.split(";")[3] else i.split(";")[3]}
+                    for i in os_output if len(i.split(";")) == 5]
+
+            except Exception as ex:
+                hana_version_info = []
+                Mu.log_warning(self.__logger, "Parsing SSH output failed in 'get_all_hana_version_info' with error:"
+                                              " {0}, server: {1}, the output: {2}".format(ex, server_id, os_output))
+        return hana_version_info
 
     def get_server_info(self, server_id, info_type):
         """ get the server information via following info_types:
@@ -1285,29 +1413,33 @@ class HANAServerDBOperatorService:
         return config_value
 
     # ----------------------------Below is for update/insert information to DB--------------------------------------
+    def update_version_info(self, check_id, server_id, version_info):
+        """update version info"""
+        self.__monitor_dao.update_version_info(check_id, server_id, version_info)
+
     def update_server_info(self, server_info, server_id):
         """update the server overview info"""
         self.__monitor_dao.update_server_info(server_info, server_id)
 
-    def update_server_monitoring_info(self, check_id, server_info, server_id):
+    def __update_server_monitoring_info(self, check_id, server_info, server_id):
         """update the server overview info to monitoring table"""
         self.__monitor_dao.update_server_monitoring_info(check_id, server_info, server_id)
 
     def update_cpu_monitoring_info(self, check_id, server_id, server_info, top_5_cpu_consumers):
         if server_info:
-            self.update_server_monitoring_info(check_id, server_info, server_id)
+            self.__update_server_monitoring_info(check_id, server_info, server_id)
         if top_5_cpu_consumers:
             self.__monitor_dao.update_cpu_monitoring_info(check_id, server_id, top_5_cpu_consumers)
 
     def update_mem_monitoring_info(self, check_id, server_id, server_info, top_5_mem_consumers):
         if server_info:
-            self.update_server_monitoring_info(check_id, server_info, server_id)
+            self.__update_server_monitoring_info(check_id, server_info, server_id)
         if top_5_mem_consumers:
             self.__monitor_dao.update_mem_monitoring_info(check_id, server_id, top_5_mem_consumers)
 
     def update_disk_monitoring_info(self, check_id, server_id, server_info, disk_consuming_info):
         if server_info:
-            self.update_server_monitoring_info(check_id, server_info, server_id)
+            self.__update_server_monitoring_info(check_id, server_info, server_id)
         if disk_consuming_info:
             self.__monitor_dao.update_disk_monitoring_info(check_id, server_id, disk_consuming_info)
 
@@ -1337,31 +1469,46 @@ class HANAServerDBOperatorService:
 class MonitorController(threading.Thread):
     """Monitor process controller, implementation of starting monitoring processes for
     all the servers by location via multiple threads.
-    To create and start the thread, it needs to be initialized by following four parameters:
+    To create and start the thread, it needs to be initialized by following parameter:
     location_id: the location/group id of the servers
-    mem_monitor: the monitor class for memory
-    cpu_monitor: the monitor class for cpu
-    disk_monitor: the monitor class for disk
     """
-    def __init__(self, location_id, mem_monitor, cpu_monitor, disk_monitor):
+
+    # define all monitors,
+    # memory monitor has to be the first one,
+    # disk monitor has to be the last one or the second last one if the last one is version monitor.
+    __monitors = [
+        MonitorAdminExtension(MemoryMonitor()),
+        MonitorAdminExtension(CPUMonitor()),
+        MonitorAdminExtension(DiskMonitor()),
+        VersionMonitor()]
+
+    @staticmethod
+    def get_locations():
+        """get all locations from monitor
+        return empty array if monitors is empty"""
+        return MonitorController.__monitors[0].get_locations() if MonitorController.__monitors else []
+
+    def __init__(self, location_id):
+        """initialize the thread with location id"""
         threading.Thread.__init__(self, name="Thread-{0}".format(location_id))
-        self.location_id = location_id
-        self.mem_monitor = mem_monitor
-        self.cpu_monitor = cpu_monitor
-        self.disk_monitor = disk_monitor
+        self.__location_id = location_id
+        self.__check_interval = \
+            MonitorController.__monitors[0].get_check_interval() if MonitorController.__monitors else None
 
     def run(self):
+        """run the thread"""
         while True:
             monitor_check_id = datetime.now().strftime('%Y%m%d%H%M%S%f')
-            self.mem_monitor.monitoring(monitor_check_id, self.location_id)
-            self.cpu_monitor.monitoring(monitor_check_id, self.location_id)
-            self.disk_monitor.monitoring(monitor_check_id, self.location_id)
-            time.sleep(Mc.get_db_check_interval(self.mem_monitor.get_db_operator()))
+            for monitor in MonitorController.__monitors:
+                monitor.monitoring(monitor_check_id, self.__location_id)
+
+            # end loop if no monitor has been added
+            if self.__check_interval is None:
+                break
+            time.sleep(self.__check_interval)
 
 
 if __name__ == '__main__':
-    monitor_mem = MonitorImproverEmailAndMeasure(MemoryMonitor())
-    monitor_cpu = MonitorImproverEmailAndMeasure(CPUMonitor())
-    monitor_disk = MonitorImproverEmailAndMeasure(DiskMonitor())
-    for server_location in Monitor().get_locations():
-        MonitorController(server_location[Mc.FIELD_LOCATION_ID], monitor_mem, monitor_cpu, monitor_disk).start()
+
+    for server_location in MonitorController.get_locations():
+        MonitorController(server_location[Mc.FIELD_LOCATION_ID]).start()

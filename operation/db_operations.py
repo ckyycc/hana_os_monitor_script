@@ -120,13 +120,15 @@ class HANAMonitorDAO:
         # commented on 2018/09/05 now only send the failing alert email at the first time after 8am of current day
         working_hour = Mc.get_operation_hours(self.__logger)[0]
         working_time = "0{0}".format(working_hour) if working_hour < 10 else "{0}".format(working_hour)
-        query = ("SELECT SERVER_FULL_NAME FROM ( SELECT B.SERVER_FULL_NAME, A.CHECK_ID, COUNT(1) AS FAILED_NUM "
-                 "FROM HANA_OS_MONITOR.M_MONITOR_CATALOG A "
+        query = ("SELECT SERVER_FULL_NAME FROM ( SELECT B.SERVER_FULL_NAME, A.SERVER_ID, A.CHECK_ID, COUNT(1) "
+                 "AS FAILED_NUM FROM HANA_OS_MONITOR.M_MONITOR_CATALOG A "
                  "INNER JOIN HANA_OS_MONITOR.SERVER_INFO B ON A.SERVER_ID = B.SERVER_ID " 
                  "WHERE A.END_TIME >= TO_TIMESTAMP(TO_NVARCHAR(CURRENT_TIMESTAMP, 'YYYY-MM-DD') "
                  "|| ' {0}:00:00', 'YYYY-MM-DD HH24:MI:SS') "
                  "AND A.STATUS = 'ERROR' AND A.CHECK_ID <= '{1}' AND A.LOCATION_ID = {2} "
-                 "GROUP BY B.SERVER_FULL_NAME, A.CHECK_ID HAVING COUNT(1) >= 3 ) "
+                 "GROUP BY B.SERVER_FULL_NAME, A.SERVER_ID, A.CHECK_ID HAVING COUNT(1) >= 3 ) C "
+                 "WHERE NOT EXISTS (SELECT 1 FROM HANA_OS_MONITOR.M_MONITOR_CATALOG D "
+                 "WHERE D.CHECK_ID > C.CHECK_ID AND D.STATUS <> 'ERROR' AND D.SERVER_ID = C.SERVER_ID)"
                  "GROUP BY SERVER_FULL_NAME "
                  "HAVING SUM(FAILED_NUM) >= 3 AND SUM(FAILED_NUM) <6".format(working_time, check_id, location_id))
 
@@ -264,6 +266,14 @@ class HANAMonitorDAO:
                  "(CHECK_ID,SERVER_ID,FOLDER,USER_NAME,DISK_USAGE_KB) VALUES (?,?,?,?,?)")
         param_list = [(check_id, server_id, row["FOLDER"], row["USER_NAME"], row["DISK_USAGE_KB"])
                       for row in disk_consuming_info]
+        self.__query_insert_batch(query, param_list)
+
+    def update_version_info(self, check_id, server_id, version_info):
+        query = ("INSERT INTO HANA_OS_MONITOR.M_VERSION_INFO"
+                 "(CHECK_ID,SERVER_ID,SID,REVISION,RELEASE_SP) VALUES (?,?,?,?,?)")
+        param_list = [(check_id, server_id, row["SID"], row["REVISION"], row["RELEASE_SP"])
+                      for row in version_info]
+
         self.__query_insert_batch(query, param_list)
 
     def insert_sid_info(self, sid_list):

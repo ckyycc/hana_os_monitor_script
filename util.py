@@ -18,7 +18,8 @@ class MonitorConst:
     LOGGER_MONITOR_MEM = "monitor.mem"
     LOGGER_MONITOR_DISK = "monitor.disk"
     LOGGER_MONITOR_CPU = "monitor.cpu"
-    LOGGER_MONITOR_IMPROVER = "monitor.improver"
+    LOGGER_MONITOR_VERSION = "monitor.version"
+    LOGGER_MONITOR_EXTENSION = "monitor.extension"
     LOGGER_MONITOR_SERVER_OS_OPERATOR = "monitor.server_os_op"
     LOGGER_MONITOR_SERVER_DB_OPERATOR = "monitor.server_db_op"
     LOGGER_MONITOR_TEST = "monitor.test"
@@ -39,11 +40,12 @@ class MonitorConst:
     MONITOR_STATUS_COMPLETE = "COMPLETE"
     MONITOR_STATUS_ERROR = "ERROR"
     MONITOR_STATUS_WARNING = "WARNING"
+    MONITOR_STATUS_SERVER_ID_OVER_ALL = -1
     MONITOR_STAGE_OVERALL = -1
     MONITOR_STAGE_MEM = 1
     MONITOR_STAGE_CPU = 2
     MONITOR_STAGE_DISK = 3
-
+    MONITOR_STAGE_VERSION = 4
     # ------ DB field mapping ------
     FIELD_SERVER_ID = "SERVER_ID"
     FIELD_SERVER_FULL_NAME = "SERVER_FULL_NAME"
@@ -74,6 +76,8 @@ class MonitorConst:
     FIELD_EMPLOYEE_ID = "EMPLOYEE_ID"
     FIELD_LOCATION_ID = "LOCATION_ID"
     FIELD_LOCATION = "LOCATION"
+    FIELD_REVISION = "REVISION"
+    FIELD_RELEASE_SP = "RELEASE_SP"
 
     # -- db configuration
     _DB_CONFIGURATION_COMPONENT_GLOBAL = "GLOBAL"
