@@ -11,7 +11,7 @@ This script implements the following functions:
 
 ## Design
 
-Check out the class diagram, sequence diagram and the use case diagram for more information:
+Check out the [class diagram](#class-diagram), [sequence diagram](#sequence-diagram) and the [use case diagram](#class-diagram) for more information:
 
 #### <ins>Class Diagram</ins>
 ![class_diagram](https://raw.githubusercontent.com/ckyycc/hana_os_monitor_script/master/design/class.svg?sanitize=true)
