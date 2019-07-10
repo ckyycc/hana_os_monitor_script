@@ -11,12 +11,11 @@
 
 ### Design
 
-#### __Use Case Diagram__
-![class_diagram](https://raw.githubusercontent.com/ckyycc/hana_os_monitor_script/master/design/usecase.svg?sanitize=true)
+#### __Class Diagram__
+![class_diagram](https://raw.githubusercontent.com/ckyycc/hana_os_monitor_script/master/design/class.svg?sanitize=true)
 
 #### __Sequence Diagram__
 ![sequence_diagram](https://raw.githubusercontent.com/ckyycc/hana_os_monitor_script/master/design/sequence.svg?sanitize=true)
 
-#### __Class Diagram__
-![class_diagram](https://raw.githubusercontent.com/ckyycc/hana_os_monitor_script/master/design/class.svg?sanitize=true)
-
+#### __Use Case Diagram__
+![class_diagram](https://raw.githubusercontent.com/ckyycc/hana_os_monitor_script/master/design/usecase.svg?sanitize=true)
