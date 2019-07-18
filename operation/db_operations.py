@@ -270,8 +270,8 @@ class HANAMonitorDAO:
 
     def update_version_info(self, check_id, server_id, version_info):
         query = ("INSERT INTO HANA_OS_MONITOR.M_VERSION_INFO"
-                 "(CHECK_ID,SERVER_ID,SID,REVISION,RELEASE_SP) VALUES (?,?,?,?,?)")
-        param_list = [(check_id, server_id, row["SID"], row["REVISION"], row["RELEASE_SP"])
+                 "(CHECK_ID,SERVER_ID,SID,REVISION,RELEASE_SP,INSTANCE_NUM) VALUES (?,?,?,?,?,?)")
+        param_list = [(check_id, server_id, row["SID"], row["REVISION"], row["RELEASE_SP"], row["INSTANCE_NUM"])
                       for row in version_info]
 
         self.__query_insert_batch(query, param_list)
