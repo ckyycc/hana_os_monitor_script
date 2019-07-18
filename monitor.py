@@ -834,11 +834,11 @@ class HANAServerOSOperatorService:
             self.__os_user = Mc.get_ssh_default_user()
             self.__logger = Mu.get_logger(Mc.LOGGER_MONITOR_SERVER_OS_OPERATOR)
 
-    def __get_oao(self, server_os=None):
+    def __get_dao(self, server_os=None):
         if server_os is None or len(server_os) == 0:
             Mu.log_debug(self.__logger, "The relative server does not have 'OS' information, using default value.")
             server_os = Mc.get_ssh_default_os_type()
-            # raise MonitorOSOpError("The relative server does not have 'OS' information, failed at '__get_oao'")
+            # raise MonitorOSOpError("The relative server does not have 'OS' information, failed at '__get_dao'")
 
         return self.__suse_dao if "SUSE" in server_os.upper() else self.__redhat_dao
 
@@ -847,13 +847,13 @@ class HANAServerOSOperatorService:
             user_name, user_password = self.__os_user, self.__os_passwd
 
         Mu.log_debug(self.__logger, "Trying to connect {0}.".format(server_name))
-        ssh = self.__get_oao().open_ssh_connection(server_name, user_name, user_password)
+        ssh = self.__get_dao().open_ssh_connection(server_name, user_name, user_password)
         if ssh is not None:
             Mu.log_debug(self.__logger, "Connected {0}.".format(server_name))
         return ssh
 
     def close_ssh_connection(self, ssh):
-        self.__get_oao().close_ssh_connection(ssh)
+        self.__get_dao().close_ssh_connection(ssh)
 
     def __init_server_info_dict(self, server_id):
         self.__server_info[server_id] = {Mc.FIELD_DISK_TOTAL: None,
@@ -895,7 +895,7 @@ class HANAServerOSOperatorService:
             # use simulator is USE_SIMULATOR is True
             total_size, unused_size = OSSimulator.simulate_collect_disk_info()
         else:
-            os_output = self.__get_oao(os).collect_disk_info(ssh, mount_point)
+            os_output = self.__get_dao(os).collect_disk_info(ssh, mount_point)
             if os_output is None:
                 Mu.log_warning(self.__logger, "Can not get disk info for server:{0}, "
                                               "mount_point:{1}.".format(server_id, mount_point))
@@ -920,7 +920,7 @@ class HANAServerOSOperatorService:
             # use simulator if USE_SIMULATOR is True
             mem_total, mem_free = OSSimulator.simulate_collect_mem_info()
         else:
-            os_output = self.__get_oao(os).collect_mem_info(ssh)
+            os_output = self.__get_dao(os).collect_mem_info(ssh)
 
             if os_output is None:
                 Mu.log_warning(self.__logger, "Can not get memory info for server:{0}.".format(server_id))
@@ -945,7 +945,7 @@ class HANAServerOSOperatorService:
             # use simulator if USE_SIMULATOR is True
             cpu_number, cpu_usage = OSSimulator.simulate_collect_cpu_info()
         else:
-            os_output_cpu_number, os_output_cpu_usage = self.__get_oao(os).collect_cpu_info(ssh)
+            os_output_cpu_number, os_output_cpu_usage = self.__get_dao(os).collect_cpu_info(ssh)
             # get cpu number
             if os_output_cpu_number is None:
                 Mu.log_warning(self.__logger, "Can not get cpu number info for server:{0}.".format(server_id))
@@ -975,7 +975,7 @@ class HANAServerOSOperatorService:
 
     def collect_os_info(self, ssh, server_id, os):
         """get os info, including os version and kernel version"""
-        os_output_os_version, os_output_os_kernel = self.__get_oao(os).collect_os_info(ssh)
+        os_output_os_version, os_output_os_kernel = self.__get_dao(os).collect_os_info(ssh)
         # get os version
         if os_output_os_version is None:
             Mu.log_warning(self.__logger, "Can not OS release info for server:{0}, ".format(server_id))
@@ -1009,7 +1009,7 @@ class HANAServerOSOperatorService:
         if Mc.use_simulator_4_mem():
             mem_consumers = OSSimulator.simulate_get_mem_consumers(ssh)
         else:
-            os_output = self.__get_oao(os).get_mem_consumers(ssh)
+            os_output = self.__get_dao(os).get_mem_consumers(ssh)
 
             if os_output is None:
                 Mu.log_warning(self.__logger, "Can not get memory consumers of ({0}).".format(server_id))
@@ -1035,7 +1035,7 @@ class HANAServerOSOperatorService:
             # use simulator if USE_SIMULATOR is True
             cpu_consumers = OSSimulator.simulate_get_cpu_consumers(ssh)
         else:
-            os_output = self.__get_oao(os).get_cpu_consumers(ssh)
+            os_output = self.__get_dao(os).get_cpu_consumers(ssh)
 
             if os_output is None:
                 Mu.log_warning(self.__logger, "Can not get cpu consumers for ({0}).".format(server_id))
@@ -1079,7 +1079,7 @@ class HANAServerOSOperatorService:
             disk_total, disk_free = self.get_server_info(server_id, Mc.SERVER_INFO_DISK)
             disk_usage_info = OSSimulator.simulate_get_disk_consumers(ssh, disk_total, disk_free)
         else:
-            os_output = self.__get_oao(os).get_disk_consumers(ssh,
+            os_output = self.__get_dao(os).get_disk_consumers(ssh,
                                                               mount_point,
                                                               is_sudosudoers,
                                                               neeed_sudo_pwd,
@@ -1092,7 +1092,7 @@ class HANAServerOSOperatorService:
             else:
                 try:
                     # get owner of the all folders in mount_point
-                    os_output_owners = self.__get_oao(os).get_owners_of_sub_folders(ssh, mount_point)
+                    os_output_owners = self.__get_dao(os).get_owners_of_sub_folders(ssh, mount_point)
 
                     # for filter purpose, add "/" at the end of mount_point
                     mount_point = "".join([mount_point, "/"])
@@ -1118,7 +1118,7 @@ class HANAServerOSOperatorService:
 
     def get_all_sid_users(self, ssh, server_id, os):
         """get all sid users (sidadm) """
-        os_output = self.__get_oao(os).get_all_sid_users(ssh)
+        os_output = self.__get_dao(os).get_all_sid_users(ssh)
 
         if os_output is None:
             Mu.log_warning(self.__logger, "Can not get all sid users for server:{0}.".format(server_id))
@@ -1134,14 +1134,22 @@ class HANAServerOSOperatorService:
 
     def get_all_hana_version_info(self, ssh, server_id, os, mount_point):
         """get version info for all hana instance, only check the ones which are installed under /usr/sap/<SID>"""
-        os_output = self.__get_oao(os).get_all_hana_version_info(ssh, mount_point)
+        os_output = self.__get_dao(os).get_all_hana_version_info(ssh, mount_point)
         if os_output is None:
             Mu.log_warning(self.__logger, "Can not get hana version info for server:{0}.".format(server_id))
             hana_version_info = []
         else:
             try:
+
+                os_output_no = self.__get_dao(os).get_all_hana_instance_num(ssh)
+
                 hana_version_info = [
                     {Mc.FIELD_SID: i.split(";")[0][len(mount_point) + 1: len(mount_point) + 4],  # + 1 means "/"
+                     Mc.FIELD_INSTANCE_NO:
+                         next((j.split("/")[4][3:5]
+                              for j in os_output_no
+                              if len(j.split("/")) == 5 and
+                              i.split(";")[0][len(mount_point) + 1: len(mount_point) + 4] == j.split("/")[3]), ''),
                      Mc.FIELD_REVISION: i.split(";")[2],
                      Mc.FIELD_RELEASE_SP: i.split(";")[3].split("/")[1] if "/" in i.split(";")[3] else i.split(";")[3]}
                     for i in os_output if len(i.split(";")) == 5]
@@ -1184,7 +1192,7 @@ class HANAServerOSOperatorService:
         return self.__server_info[server_id]
 
     def shutdown_hana(self, ssh, os):
-        self.__get_oao(os).shutdown_hana(ssh)
+        self.__get_dao(os).shutdown_hana(ssh)
 
 
 class HANAServerDBOperatorService:
