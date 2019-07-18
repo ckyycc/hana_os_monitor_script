@@ -155,6 +155,12 @@ class LinuxMonitorDAO:
             "-print 2>/dev/null | awk '{for (i=1;i<=NF;i++) "
             "{system(\"echo \\\"\"$i\";\\\"`tail -1 \"$i\"`\")}}'", ssh)
 
+    def get_all_hana_instance_num(self, ssh):
+        # exclude mount_point/log and mount_point/tmp for hanging issue of llbpal94 and llbpal96
+        return self.__ssh_exec_command(
+            "find /usr/sap/[A-Z][A-Z0-9][A-Z0-9] -type d -maxdepth 1 -path /usr/sap/tmp -prune -o -path /usr/sap/log"
+            " -prune -o -iname HDB[0-9][0-9] -print 2>/dev/null", ssh)
+
     def get_owners_of_sub_folders(self, ssh, folder):
         # get owner of the all folders in <folder>
         return self.__ssh_exec_command("".join(["ls -ld {0}/* | awk ".format(folder), "'{print $3\"\t\"$NF}'"]), ssh)
