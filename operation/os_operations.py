@@ -147,19 +147,15 @@ class LinuxMonitorDAO:
 
         return cmd_output
 
-    def get_all_hana_version_info(self, ssh, mount):
-        # exclude mount_point/log and mount_point/tmp for hanging issue of llbpal94 and llbpal96
-        return self.__ssh_exec_command(
-            "find {0}/[A-Z][A-Z0-9][A-Z0-9] -path {0}/tmp -prune -o -path {0}/log -prune -o -regex {0}".format(mount) +
-            "/[A-Z][A-Z0-9][A-Z0-9]/.*global/hdb/versionhistory.csv "
-            "-print 2>/dev/null | awk '{for (i=1;i<=NF;i++) "
-            "{system(\"echo \\\"\"$i\";\\\"`tail -1 \"$i\"`\")}}'", ssh)
-
-    def get_all_hana_instance_num(self, ssh):
-        # exclude mount_point/log and mount_point/tmp for hanging issue of llbpal94 and llbpal96
-        return self.__ssh_exec_command(
-            "find /usr/sap/[A-Z][A-Z0-9][A-Z0-9] -type d -maxdepth 1 -path /usr/sap/tmp -prune -o -path /usr/sap/log"
-            " -prune -o -iname HDB[0-9][0-9] -print 2>/dev/null", ssh)
+    def get_all_hana_instance_info(self, ssh, path):
+        # switch to hdblcm because it contains nodes num info and will not hang when scanning some share folder
+        # but needs to copy hdblcm to all home/bin path or use some share folder
+        if path is None:
+            return self.__ssh_exec_command(
+                "~/bin/hdblcm --list_systems | egrep 'HDB_ALONE|HDB[0-9][0-9]|version:|hosts?|edition:'", ssh)
+        else:
+            return self.__ssh_exec_command(
+                "{0}/hdblcm --list_systems |egrep 'HDB_ALONE|HDB[0-9][0-9]|version:|hosts?|edition:'".format(path), ssh)
 
     def get_owners_of_sub_folders(self, ssh, folder):
         # get owner of the all folders in <folder>
