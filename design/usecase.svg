@@ -87,7 +87,7 @@
     ><g transform="translate(570,560)"
     ><ellipse rx="79.25" fill="none" ry="24.25" clip-path="url(#clipPath2)" cx="79.75" cy="24.75"
       /><text x="21" font-size="14px" y="29.9844" clip-path="url(#clipPath2)" font-family="sans-serif" stroke="none" xml:space="preserve"
-      >Version Monitoring</text
+      >Instance Info Monitoring</text
     ></g
     ><g fill="rgb(255,255,255)" fill-opacity="0" transform="translate(570,430)" stroke-opacity="0" stroke="rgb(255,255,255)"
     ><ellipse rx="79.25" ry="24.25" clip-path="url(#clipPath2)" cx="79.75" cy="24.75" stroke="none"

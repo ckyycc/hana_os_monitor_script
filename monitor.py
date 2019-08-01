@@ -15,6 +15,7 @@ from operator import itemgetter
 
 import threading
 import time
+import re
 
 
 class Monitor(ABC):
@@ -335,17 +336,18 @@ class DiskMonitor(Monitor):
         Mu.log_debug(self.__logger, "Disk Monitoring finished.", location_id)
 
 
-class VersionMonitor(Monitor):
-    """Collecting info for hana versions, update hana version info from all the servers.
+class InstanceInfoMonitor(Monitor):
+    """Collecting basic info for hana instances, update hana instance info from all the servers.
+    Including SID, instance number, host, server name, revision, edition and so on.
     Not to affect the overall status calculation, this stage is not counted when calculating status of overall stage
     """
 
     def __init__(self):
-        self.__logger = Mu.get_logger(Mc.LOGGER_MONITOR_VERSION)
+        self.__logger = Mu.get_logger(Mc.LOGGER_MONITOR_INSTANCE)
         super().__init__()
 
     def monitoring(self, check_id, location_id):
-        Mu.log_debug(self.__logger, "[{0}]Version Monitoring begin...".format(check_id), location_id)
+        Mu.log_debug(self.__logger, "[{0}]Instance Monitoring begin...".format(check_id), location_id)
         server_name_list = self._db_operator.get_server_full_names(location_id)
 
         for server in server_name_list:
@@ -355,7 +357,7 @@ class VersionMonitor(Monitor):
             mount_point = server[Mc.FIELD_MOUNT_POINT]
             server_os = server[Mc.FIELD_OS]
 
-            # stage version will not affect the overall stage, not like the other three stages
+            # stage of collecting instance info will not affect the overall stage, not like the other three stages
             self.accept(MonitorCatalogUpdater(check_id,
                                               location_id,
                                               server_id,
@@ -374,32 +376,32 @@ class VersionMonitor(Monitor):
                 continue
             try:
                 Mu.log_info(self.__logger, "Connected {0}".format(server_name), location_id)
-                Mu.log_debug(self.__logger, "Trying to get version info of {0}".format(server_name), location_id)
-                # collect version info for one server by server id
-                version_info = self._os_operator.get_all_hana_version_info(ssh, server_id, server_os, mount_point)
+                Mu.log_debug(self.__logger, "Trying to get instance info of {0}".format(server_name), location_id)
+                # collect instance info for one server by server id
+                instance_info = self._os_operator.get_all_hana_instance_info(ssh, server_id, server_os)
                 Mu.log_debug(self.__logger,
-                             "Version information of {0} is {1}".format(server_name, version_info),
+                             "Instance information of {0} is {1}".format(server_name, instance_info),
                              location_id)
 
-                if version_info:  # will skip update database if version info is empty
+                if instance_info:  # will skip update database if instance info is empty
                     self.accept(MonitorResourceUpdater(check_id,
                                                        server_id,
                                                        None,
-                                                       version_info))
+                                                       instance_info))
                 else:
                     Mu.log_debug(self.__logger,
-                                 "Version information for {0} is empty, skipped updating db.".format(server_name))
+                                 "Instance information for {0} is empty, skipped updating db.".format(server_name))
             finally:
                 self._os_operator.close_ssh_connection(ssh)
-            Mu.log_info(self.__logger, "Version Monitoring is done for {0}.".format(server_name), location_id)
+            Mu.log_info(self.__logger, "Instance Monitoring is done for {0}.".format(server_name), location_id)
 
             self.accept(MonitorCatalogUpdater(check_id,
                                               location_id,
                                               server_id,
                                               Mc.MONITOR_STATUS_COMPLETE,
-                                              "Version Monitoring is done for {0}.".format(server_name)))
+                                              "Instance Monitoring is done for {0}.".format(server_name)))
 
-        Mu.log_debug(self.__logger, "Version Monitoring finished.", location_id)
+        Mu.log_debug(self.__logger, "Instance Monitoring finished.", location_id)
 
 
 class DBUpdater(ABC):
@@ -426,8 +428,8 @@ class MonitorResourceUpdater(DBUpdater):
             self.__update_cpu_monitor(monitor)
         elif isinstance(monitor, DiskMonitor):
             self.__update_disk_monitor(monitor)
-        elif isinstance(monitor, VersionMonitor):
-            self.__update_version_monitor(monitor)
+        elif isinstance(monitor, InstanceInfoMonitor):
+            self.__update_instance_info_monitor(monitor)
 
     def __update_mem_monitor(self, monitor):
         # update the memory monitoring info with:
@@ -456,11 +458,11 @@ class MonitorResourceUpdater(DBUpdater):
                                                               self.__server_info,
                                                               self.__monitor_updates)
 
-    def __update_version_monitor(self, monitor):
-        # update version info with self.monitor_updates
-        monitor.get_db_operator().update_version_info(self.__check_id,
-                                                      self.__server_id,
-                                                      self.__monitor_updates)
+    def __update_instance_info_monitor(self, monitor):
+        # update instance info with self.monitor_updates
+        monitor.get_db_operator().update_instance_info(self.__check_id,
+                                                       self.__server_id,
+                                                       self.__monitor_updates)
 
 
 class MonitorCatalogUpdater(DBUpdater):
@@ -489,8 +491,8 @@ class MonitorCatalogUpdater(DBUpdater):
                 return
             else:
                 self.__stage = Mc.MONITOR_STAGE_DISK
-        elif isinstance(monitor, VersionMonitor):
-            self.__stage = Mc.MONITOR_STAGE_VERSION
+        elif isinstance(monitor, InstanceInfoMonitor):
+            self.__stage = Mc.MONITOR_STAGE_INSTANCE
         else:
             raise MonitorError("Unknown class: {0}!".format(monitor.__class__.__name__))
 
@@ -1132,33 +1134,41 @@ class HANAServerOSOperatorService:
                                               "server: {1}, the output: {2}".format(ex, server_id, os_output))
         return sid_users
 
-    def get_all_hana_version_info(self, ssh, server_id, os, mount_point):
-        """get version info for all hana instance, only check the ones which are installed under /usr/sap/<SID>"""
-        os_output = self.__get_dao(os).get_all_hana_version_info(ssh, mount_point)
+    def get_all_hana_instance_info(self, ssh, server_id, os, path=None):
+        """get instance info for all hana instance"""
+        os_output = self.__get_dao(os).get_all_hana_instance_info(ssh, path)
         if os_output is None:
-            Mu.log_warning(self.__logger, "Can not get hana version info for server:{0}.".format(server_id))
-            hana_version_info = []
+            Mu.log_warning(self.__logger, "Can not get hana instance info for server:{0}.".format(server_id))
+            hana_info = []
         else:
             try:
+                i = 0
+                hana_info = []
+                while i < len(os_output):
+                    if "HDB_ALONE" in os_output[i]:
+                        info = {Mc.FIELD_SID: os_output[i].split(" ")[0]}
+                        i += 1
+                        while i < len(os_output) and "HDB_ALONE" not in os_output[i]:
+                            if re.match("HDB[0-9][0-9]", os_output[i].strip()):
+                                info[Mc.FIELD_INSTANCE_NO] = os_output[i].strip()[3:].strip()
+                            elif re.match("hosts?", os_output[i].strip()):
+                                info[Mc.FIELD_HOST] = "{0} [{1}]".format(
+                                    len(os_output[i].split(":")[1].strip().split(","))
+                                    if len(os_output[i].split(":")[1].strip()) > 0 else 0,
+                                    os_output[i].split(":")[1].strip())
+                            elif "version:" in os_output[i]:
+                                info[Mc.FIELD_REVISION] = os_output[i].split(" ")[1].strip()
+                            elif "edition:" in os_output[i]:
+                                info[Mc.FIELD_EDITION] = os_output[i].split(":")[1].strip()
 
-                os_output_no = self.__get_dao(os).get_all_hana_instance_num(ssh)
-
-                hana_version_info = [
-                    {Mc.FIELD_SID: i.split(";")[0][len(mount_point) + 1: len(mount_point) + 4],  # + 1 means "/"
-                     Mc.FIELD_INSTANCE_NO:
-                         next((j.split("/")[4][3:5]
-                              for j in os_output_no
-                              if len(j.split("/")) == 5 and
-                              i.split(";")[0][len(mount_point) + 1: len(mount_point) + 4] == j.split("/")[3]), ''),
-                     Mc.FIELD_REVISION: i.split(";")[2],
-                     Mc.FIELD_RELEASE_SP: i.split(";")[3].split("/")[1] if "/" in i.split(";")[3] else i.split(";")[3]}
-                    for i in os_output if len(i.split(";")) == 5]
+                            i += 1
+                        hana_info.append(info)
 
             except Exception as ex:
-                hana_version_info = []
-                Mu.log_warning(self.__logger, "Parsing SSH output failed in 'get_all_hana_version_info' with error:"
+                hana_info = []
+                Mu.log_warning(self.__logger, "Parsing SSH output failed in 'get_all_hana_instance_info' with error:"
                                               " {0}, server: {1}, the output: {2}".format(ex, server_id, os_output))
-        return hana_version_info
+        return hana_info
 
     def get_server_info(self, server_id, info_type):
         """ get the server information via following info_types:
@@ -1421,9 +1431,9 @@ class HANAServerDBOperatorService:
         return config_value
 
     # ----------------------------Below is for update/insert information to DB--------------------------------------
-    def update_version_info(self, check_id, server_id, version_info):
-        """update version info"""
-        self.__monitor_dao.update_version_info(check_id, server_id, version_info)
+    def update_instance_info(self, check_id, server_id, info):
+        """update instance info"""
+        self.__monitor_dao.update_instance_info(check_id, server_id, info)
 
     def update_server_info(self, server_info, server_id):
         """update the server overview info"""
@@ -1483,12 +1493,12 @@ class MonitorController(threading.Thread):
 
     # define all monitors,
     # memory monitor has to be the first one,
-    # disk monitor has to be the last one or the second last one if the last one is version monitor.
+    # disk monitor has to be the last one or the second last one if the last one is instance monitor.
     __monitors = [
         MonitorAdminExtension(MemoryMonitor()),
         MonitorAdminExtension(CPUMonitor()),
         MonitorAdminExtension(DiskMonitor()),
-        VersionMonitor()]
+        InstanceInfoMonitor()]
 
     @staticmethod
     def get_locations():

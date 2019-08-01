@@ -7,7 +7,8 @@ This script implements the following functions:
 * Send warning email to the top 5 resource consumers when the threshold of resource consumption is exceeded;
 * Send warning email to administrators if some server is not available;
 * Try to shutdown HANA (via HDB stop) instance if the warning email has been sent for over three times (only valid for memory monitoring);
-* Monitor and save the version info (to DB) for all hana instances.
+* Monitor and save the instance basic info (to DB) for all hana instances, including SID, instance number, host, server name, revision, edition and so on. 
+.
 
 ## Design
 
