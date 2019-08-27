@@ -659,6 +659,29 @@ class MonitorAdminExtension(MonitorExtension):
                         Mu.log_warning(self.__logger,
                                        "Failed to connect {0}, with user {1}".format(server_name, user_name),
                                        location_id)
+
+                        # sending warning email
+                        if email is not None and len(email) > 0:
+                            # sending email to the owner of the instance
+                            email_to = [email]
+                            email_body = ("Dear {0}, \n\n{1} is running out of memory, your {2} is consuming "
+                                          "the highest memory and it is not using the standard password (maybe). "
+                                          "If this SID is very important please contact administrator"
+                                          " to mark it as an important SID. \n"
+                                          "\n\nRegards,\nHANA OS Monitor".format(employee_name, server_name, sid))
+                            Mu.log_debug(self.__logger, "[MEM] Sending email to:{0} for "
+                                                        "not using standard password.".format(email_to), location_id)
+                            Mu.send_email(Mc.get_db_email_sender(self._monitor.get_db_operator(), self.__logger),
+                                          email_to,
+                                          "[MONITOR.MEM] {0} on {1} High Memory Consumption " 
+                                          "Alert!!!".format(sid, server_name),
+                                          email_body,
+                                          self._monitor.get_db_operator().get_email_admin(location_id))
+                        else:
+                            Mu.log_info(self.__logger,
+                                        "Email is not sent for HANA:{0} on {1}, "
+                                        "because no email is configured.".format(sid, server_name),
+                                        location_id)
                     else:
                         try:
                             Mu.log_info(self.__logger,
